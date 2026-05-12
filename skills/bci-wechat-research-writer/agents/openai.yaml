@@ -1,0 +1,4 @@
+interface:
+  display_name: "BCI WeChat Research Writer"
+  short_description: "Find, analyze, and draft BCI research articles for WeChat."
+  default_prompt: "Find recent high-impact brain-computer interface papers, analyze one selected paper, and prepare a WeChat-ready draft with evidence, figures, and publishing checks."
