@@ -8,6 +8,7 @@ import {
   Clock3,
   DatabaseZap,
   ExternalLink,
+  FileText,
   Flame,
   GitFork,
   Loader2,
@@ -15,6 +16,7 @@ import {
   Newspaper,
   RefreshCcw,
   Search,
+  Send,
   Sparkles,
   TrendingUp,
 } from "lucide-react";
@@ -75,6 +77,23 @@ type SourceHealth = {
 type DailyDigest = {
   total: number;
   groups: Array<{ category: string; items: Item[] }>;
+};
+
+type GithubWechatDraft = {
+  id: string;
+  item_id: string;
+  draft_type: string;
+  title: string;
+  digest: string;
+  markdown: string;
+  image_plan: {
+    items?: Array<{ type?: string; source?: string; note?: string }>;
+  };
+  style_notes: Record<string, unknown>;
+  submission_status: string;
+  submit_result: { message?: string; generation_fallback?: string };
+  created_at: string;
+  updated_at: string;
 };
 
 type TabKey = "timeline" | "featured" | "search" | "daily" | "sources";
@@ -196,6 +215,10 @@ function sourceIcon(type: string) {
   return Newspaper;
 }
 
+function isGithubItem(item: Item) {
+  return item.source.source_type.startsWith("github");
+}
+
 function withinWindow(item: Item, days: number) {
   if (!days || !item.published_at) return true;
   const since = Date.now() - days * 24 * 60 * 60 * 1000;
@@ -215,7 +238,15 @@ function groupByDay(items: Item[]) {
   }, []);
 }
 
-function ItemRow({ item }: { item: Item }) {
+function ItemRow({
+  item,
+  generatingDraft,
+  onGenerateDraft,
+}: {
+  item: Item;
+  generatingDraft: boolean;
+  onGenerateDraft: (itemId: string) => void;
+}) {
   const Icon = sourceIcon(item.source.source_type);
   return (
     <article className="border-b border-line py-5 last:border-b-0">
@@ -254,6 +285,16 @@ function ItemRow({ item }: { item: Item }) {
               排序理由：{item.score_details.reason}
             </p>
           ) : null}
+          {isGithubItem(item) ? (
+            <button
+              onClick={() => onGenerateDraft(item.id)}
+              disabled={generatingDraft}
+              className="mt-4 inline-flex items-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-sm text-ink/75 hover:border-accent disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {generatingDraft ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+              公众号稿
+            </button>
+          ) : null}
         </div>
         <div className="w-16 shrink-0 text-right">
           <p className="text-2xl font-semibold text-accent">{Math.round(item.final_score)}</p>
@@ -279,6 +320,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [githubDraft, setGithubDraft] = useState<GithubWechatDraft | null>(null);
 
   const categories = useMemo(() => {
     const values = new Set(allItems.map((item) => item.category));
@@ -382,6 +424,22 @@ export default function Dashboard() {
     }
   }
 
+  async function generateGithubDraft(itemId?: string) {
+    const key = itemId ? `github-draft-${itemId}` : "github-draft";
+    setActionLoading(key);
+    try {
+      const params = new URLSearchParams({ submit: "true" });
+      if (itemId) params.set("item_id", itemId);
+      const result = await apiPost<GithubWechatDraft>(`/admin/github-wechat/drafts?${params.toString()}`);
+      setGithubDraft(result);
+      setMessage(`GitHub公众号稿已生成：${result.title}`);
+    } catch (error) {
+      setMessage(`GitHub公众号稿生成失败：${error instanceof Error ? error.message : "未知错误"}`);
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
   useEffect(() => {
     void loadCore();
   }, []);
@@ -409,6 +467,10 @@ export default function Dashboard() {
               <button onClick={() => void runAction("translate")} className="inline-flex items-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-sm hover:border-accent">
                 {actionLoading === "translate" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                 翻译标题
+              </button>
+              <button onClick={() => void generateGithubDraft()} className="inline-flex items-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-sm hover:border-accent">
+                {actionLoading === "github-draft" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                GitHub稿
               </button>
               <button onClick={() => void runAction("enrich")} className="inline-flex items-center gap-2 rounded-md bg-accent px-3 py-2 text-sm font-medium text-white">
                 {actionLoading === "enrich" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
@@ -522,6 +584,40 @@ export default function Dashboard() {
             </div>
           ) : null}
 
+          {githubDraft ? (
+            <section className="border border-line bg-white p-5">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-normal text-accent">GitHub 公众号草稿</p>
+                  <h2 className="mt-1 text-lg font-semibold">{githubDraft.title}</h2>
+                  <p className="mt-2 text-sm leading-6 text-ink/65">{githubDraft.digest}</p>
+                </div>
+                <div className="shrink-0 rounded-md bg-field px-3 py-2 text-xs text-ink/60">
+                  {githubDraft.submission_status}
+                </div>
+              </div>
+              <p className="mt-4 border-l-2 border-accent pl-3 text-sm text-ink/65">
+                {githubDraft.submit_result?.message ?? "草稿已保存。"}
+              </p>
+              {githubDraft.image_plan?.items?.length ? (
+                <div className="mt-4 grid gap-2 text-sm md:grid-cols-3">
+                  {githubDraft.image_plan.items.map((image, index) => (
+                    <div key={`${image.type ?? "image"}-${index}`} className="border border-line bg-field p-3">
+                      <p className="font-medium">{image.type ?? "配图"}</p>
+                      <p className="mt-1 break-words text-xs text-ink/55">{image.source ?? "editorial"}</p>
+                      <p className="mt-2 text-xs leading-5 text-ink/65">{image.note ?? "需人工确认版权和预览效果。"}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <textarea
+                readOnly
+                value={githubDraft.markdown}
+                className="mt-4 h-72 w-full resize-y rounded-md border border-line bg-field p-4 font-mono text-xs leading-5 text-ink outline-none"
+              />
+            </section>
+          ) : null}
+
           {activeTab === "daily" ? (
             <div className="space-y-5">
               <div>
@@ -533,7 +629,14 @@ export default function Dashboard() {
                   <div className="border-b border-line py-4">
                     <h3 className="font-semibold">{group.category}</h3>
                   </div>
-                  {group.items.map((item) => <ItemRow key={item.id} item={item} />)}
+                  {group.items.map((item) => (
+                    <ItemRow
+                      key={item.id}
+                      item={item}
+                      generatingDraft={actionLoading === `github-draft-${item.id}`}
+                      onGenerateDraft={(selectedId) => void generateGithubDraft(selectedId)}
+                    />
+                  ))}
                 </section>
               ))}
             </div>
@@ -599,7 +702,14 @@ export default function Dashboard() {
                     <div className="sticky top-[145px] z-[1] border-b border-line bg-white py-4">
                       <h3 className="font-semibold">{group.day}</h3>
                     </div>
-                    {group.items.map((item) => <ItemRow key={item.id} item={item} />)}
+                    {group.items.map((item) => (
+                      <ItemRow
+                        key={item.id}
+                        item={item}
+                        generatingDraft={actionLoading === `github-draft-${item.id}`}
+                        onGenerateDraft={(selectedId) => void generateGithubDraft(selectedId)}
+                      />
+                    ))}
                   </section>
                 ))
               )}

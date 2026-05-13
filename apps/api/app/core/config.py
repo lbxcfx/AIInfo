@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     meilisearch_master_key: str = "change_me_in_production"
     github_token: str = Field(default="", repr=False)
     x_bearer_token: str = Field(default="", repr=False)
+    wechat_app_id: str = Field(default="", repr=False)
+    wechat_app_secret: str = Field(default="", repr=False)
 
     llm_provider: str = "bigmodel"
     zai_api_key: str = Field(default="", repr=False)

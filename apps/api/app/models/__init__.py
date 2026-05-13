@@ -4,5 +4,6 @@ from app.models.llm_call import LlmCall
 from app.models.raw_item import RawItem
 from app.models.source import Source
 from app.models.source_health import SourceHealth
+from app.models.wechat_draft import WechatDraft
 
-__all__ = ["Item", "ItemEmbedding", "LlmCall", "RawItem", "Source", "SourceHealth"]
+__all__ = ["Item", "ItemEmbedding", "LlmCall", "RawItem", "Source", "SourceHealth", "WechatDraft"]

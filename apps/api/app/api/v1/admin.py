@@ -1,11 +1,13 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.schemas.common import ApiResponse
 from app.schemas.item import CrawlRunResult
+from app.schemas.wechat import WechatDraftRead
 from app.services.crawler import crawl_enabled_sources
 from app.services.enrichment import enrich_items_batch, translate_titles_batch
+from app.services.github_wechat import generate_github_wechat_draft
 from app.services.llm import BigModelClient
 from app.services.rescore import rescore_github_items
 from app.services.search import reindex_items
@@ -94,3 +96,16 @@ async def rescore_github(db: AsyncSession = Depends(get_db)) -> ApiResponse[dict
     result = await rescore_github_items(db)
     result["reindex"] = await reindex_items(db)
     return ApiResponse(data=result)
+
+
+@router.post("/github-wechat/drafts")
+async def create_github_wechat_draft(
+    item_id: str | None = None,
+    submit: bool = True,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[WechatDraftRead]:
+    try:
+        draft = await generate_github_wechat_draft(db, item_id=item_id, submit=submit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ApiResponse(data=WechatDraftRead.model_validate(draft))

@@ -19,10 +19,10 @@ pnpm 10.23.0
 前端关键依赖已固定在 `apps/web/package.json` 和 `pnpm-lock.yaml` 中：
 
 ```text
-next 15.5.16
-react 19.2.6
-react-dom 19.2.6
-eslint-config-next 15.5.16
+next 15.1.12
+react 19.0.0
+react-dom 19.0.0
+eslint-config-next 15.1.12
 ```
 
 后端 Python 依赖固定在 `apps/api/requirements.txt` 中。
@@ -113,7 +113,11 @@ NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000/api/v1
 ZAI_API_KEY
 GITHUB_TOKEN
 X_BEARER_TOKEN
+WECHAT_APP_ID
+WECHAT_APP_SECRET
 ```
+
+`WECHAT_APP_ID` 和 `WECHAT_APP_SECRET` 用于后续接入微信公众号草稿箱。未配置时，系统只会生成并保存 Markdown 草稿，不会上传微信后台。
 
 ## 5. 数据库迁移
 
