@@ -163,6 +163,39 @@ SEED_SOURCES = [
         "reliability_score": 78,
     },
     {
+        "name": "Hugging Face 趋势模型",
+        "url": "https://huggingface.co/api/models?sort=trending_score",
+        "source_type": "huggingface_trending",
+        "tier": "T1_5",
+        "language": "en",
+        "category_hint": "模型发布/更新",
+        "crawl_interval_minutes": 120,
+        "reliability_score": 88,
+        "extra": {"repo_type": "models", "sort": "trending_score", "limit": 30},
+    },
+    {
+        "name": "Hugging Face 趋势数据集",
+        "url": "https://huggingface.co/api/datasets?sort=trending_score",
+        "source_type": "huggingface_trending",
+        "tier": "T2",
+        "language": "en",
+        "category_hint": "论文研究",
+        "crawl_interval_minutes": 180,
+        "reliability_score": 82,
+        "extra": {"repo_type": "datasets", "sort": "trending_score", "limit": 20},
+    },
+    {
+        "name": "Hugging Face 趋势 Spaces",
+        "url": "https://huggingface.co/api/spaces?sort=trending_score",
+        "source_type": "huggingface_trending",
+        "tier": "T2",
+        "language": "en",
+        "category_hint": "产品发布/更新",
+        "crawl_interval_minutes": 180,
+        "reliability_score": 82,
+        "extra": {"repo_type": "spaces", "sort": "trending_score", "limit": 20},
+    },
+    {
         "name": "GitHub AI 热门仓库",
         "url": "https://api.github.com/search/repositories?q=topic:artificial-intelligence+stars:%3E1000+forks:%3E50+archived:false&sort=stars&order=desc",
         "source_type": "github_trending",
@@ -238,9 +271,17 @@ SEED_SOURCES = [
 
 
 async def seed_sources(db: AsyncSession) -> int:
+    legacy_urls = [
+        "https://huggingface.co/api/models?sort=trending",
+        "https://huggingface.co/api/datasets?sort=trending",
+        "https://huggingface.co/api/spaces?sort=trending",
+    ]
     legacy = (
         await db.execute(
-            select(Source).where(Source.name.in_(["GitHub AI 趋势", "GitHub AI 趋势（旧规则停用）"]))
+            select(Source).where(
+                Source.name.in_(["GitHub AI 趋势", "GitHub AI 趋势（旧规则停用）"])
+                | Source.url.in_(legacy_urls)
+            )
         )
     ).scalars().all()
     for source in legacy:

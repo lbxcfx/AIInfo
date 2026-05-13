@@ -140,6 +140,26 @@ def build_item(raw: RawItem, source: Source) -> Item:
 
 
 def apply_source_specific_score(base_score: float, extra: dict[str, Any], source_type: str) -> float:
+    if source_type.startswith("huggingface"):
+        likes = int(extra.get("likes") or 0)
+        downloads = int(extra.get("downloads") or 0)
+        trending_rank = int(extra.get("trending_rank") or 0)
+        metric_boost = 0.0
+        if downloads >= 100000:
+            metric_boost += 7
+        elif downloads >= 10000:
+            metric_boost += 4
+        elif downloads >= 1000:
+            metric_boost += 2
+        if likes >= 1000:
+            metric_boost += 6
+        elif likes >= 200:
+            metric_boost += 3
+        elif likes < 20:
+            metric_boost -= 4
+        if trending_rank:
+            metric_boost += max(0, 6 - trending_rank * 0.15)
+        return round(max(30.0, min(99.0, base_score + metric_boost)), 1)
     if not source_type.startswith("github"):
         return base_score
     stars = int(extra.get("stars") or 0)
@@ -222,6 +242,15 @@ def github_recent_query(query: str, recent_days: int) -> str:
         return query
     since = (datetime.now(timezone.utc) - timedelta(days=recent_days)).date().isoformat()
     return f"{query} pushed:>={since}"
+
+
+def parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        return None
 
 
 async def fetch_github_repo(client: httpx.AsyncClient, slug: str, headers: dict[str, str]) -> dict[str, Any] | None:
@@ -330,7 +359,7 @@ async def crawl_rss_source(db: AsyncSession, source: Source) -> tuple[int, int, 
         await db.commit()
     except Exception as exc:
         await db.rollback()
-        error_message = str(exc)
+        error_message = str(exc) or exc.__class__.__name__
     db.add(
         SourceHealth(
             source_id=source_id,
@@ -388,7 +417,7 @@ async def crawl_web_page_list_source(db: AsyncSession, source: Source) -> tuple[
         await db.commit()
     except Exception as exc:
         await db.rollback()
-        error_message = str(exc)
+        error_message = str(exc) or exc.__class__.__name__
     db.add(
         SourceHealth(
             source_id=source_id,
@@ -466,7 +495,7 @@ async def crawl_github_trending_source(db: AsyncSession, source: Source) -> tupl
         await db.commit()
     except Exception as exc:
         await db.rollback()
-        error_message = str(exc)
+        error_message = str(exc) or exc.__class__.__name__
     db.add(
         SourceHealth(
             source_id=source_id,
@@ -542,7 +571,101 @@ async def crawl_github_page_source(db: AsyncSession, source: Source) -> tuple[in
         await db.commit()
     except Exception as exc:
         await db.rollback()
-        error_message = str(exc)
+        error_message = str(exc) or exc.__class__.__name__
+    db.add(
+        SourceHealth(
+            source_id=source_id,
+            checked_at=datetime.now(timezone.utc),
+            status="ok" if error_message is None else "error",
+            fetched_count=fetched_count,
+            new_count=created_count,
+            error_message=error_message,
+        )
+    )
+    await db.commit()
+    return fetched_count, created_count, error_message
+
+
+async def crawl_huggingface_trending_source(db: AsyncSession, source: Source) -> tuple[int, int, str | None]:
+    source_id = source.id
+    fetched_count = 0
+    created_count = 0
+    error_message = None
+    repo_type = source.extra.get("repo_type") or "models"
+    api_paths = {
+        "models": "/api/models",
+        "datasets": "/api/datasets",
+        "spaces": "/api/spaces",
+    }
+    page_prefixes = {
+        "models": "",
+        "datasets": "/datasets",
+        "spaces": "/spaces",
+    }
+    api_path = api_paths.get(repo_type, "/api/models")
+    page_prefix = page_prefixes.get(repo_type, "")
+    limit = int(source.extra.get("limit") or 30)
+    sort = source.extra.get("sort") or "trending"
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True, trust_env=False) as client:
+            response = await client.get(
+                f"https://huggingface.co{api_path}",
+                params={"sort": sort, "direction": -1, "limit": limit, "full": True},
+                headers={"User-Agent": "AIIntelRadarBot/0.1 (+local-dev)"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+            repos = payload if isinstance(payload, list) else payload.get("items", [])
+            for rank, repo in enumerate(repos[:limit], start=1):
+                repo_id = repo.get("id") or repo.get("modelId")
+                if not repo_id:
+                    continue
+                fetched_count += 1
+                tags = repo.get("tags") or []
+                card_data = repo.get("cardData") or {}
+                description = (
+                    repo.get("description")
+                    or card_data.get("description")
+                    or card_data.get("summary")
+                    or f"Hugging Face trending {repo_type[:-1] if repo_type.endswith('s') else repo_type}"
+                )
+                likes = int(repo.get("likes") or 0)
+                downloads = int(repo.get("downloads") or 0)
+                task = repo.get("pipeline_tag") or repo.get("sdk") or card_data.get("task") or "unknown"
+                content = (
+                    f"Hugging Face 趋势信号。repo_type: {repo_type}; rank: {rank}; "
+                    f"downloads: {downloads}; likes: {likes}; task: {task}; tags: {', '.join(tags[:12])}. "
+                    f"{description}"
+                )
+                published_at = (
+                    parse_iso_datetime(repo.get("lastModified"))
+                    or parse_iso_datetime(repo.get("createdAt"))
+                    or datetime.now(timezone.utc)
+                )
+                created = await persist_raw_item(
+                    db,
+                    source=source,
+                    raw_url=f"https://huggingface.co{page_prefix}/{repo_id}",
+                    fetched_url=str(response.url),
+                    raw_title=f"{repo_id}: {description}",
+                    raw_content=content,
+                    published_at=published_at,
+                    http_status=response.status_code,
+                    extra={
+                        "repo_type": repo_type,
+                        "downloads": downloads,
+                        "likes": likes,
+                        "task": task,
+                        "tags": tags,
+                        "trending_rank": rank,
+                    },
+                )
+                if created:
+                    created_count += 1
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        error_message = str(exc) or exc.__class__.__name__
     db.add(
         SourceHealth(
             source_id=source_id,
@@ -619,7 +742,7 @@ async def crawl_x_recent_source(db: AsyncSession, source: Source) -> tuple[int, 
         await db.commit()
     except Exception as exc:
         await db.rollback()
-        error_message = str(exc)
+        error_message = str(exc) or exc.__class__.__name__
     db.add(
         SourceHealth(
             source_id=source_id,
@@ -652,6 +775,8 @@ async def crawl_enabled_sources(db: AsyncSession) -> dict[str, Any]:
             _, created, error = await crawl_github_trending_source(db, source)
         elif source.source_type in {"github_trending_page", "github_topic_page"}:
             _, created, error = await crawl_github_page_source(db, source)
+        elif source.source_type == "huggingface_trending":
+            _, created, error = await crawl_huggingface_trending_source(db, source)
         elif source.source_type == "x_recent_search":
             _, created, error = await crawl_x_recent_source(db, source)
         else:

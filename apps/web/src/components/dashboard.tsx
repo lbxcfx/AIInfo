@@ -206,6 +206,7 @@ function sourceTypeLabel(type: string) {
     github_trending: "GitHub热门",
     github_trending_page: "GitHub官方趋势",
     github_topic_page: "GitHub官方专题",
+    huggingface_trending: "Hugging Face趋势",
     x_recent_search: "X热议",
   };
   return labels[type] ?? "其他来源";
@@ -215,6 +216,7 @@ function sourceIcon(type: string) {
   if (type === "github_trending") return GitFork;
   if (type === "github_trending_page") return GitFork;
   if (type === "github_topic_page") return GitFork;
+  if (type === "huggingface_trending") return Flame;
   if (type === "x_recent_search") return MessageCircle;
   return Newspaper;
 }
@@ -853,7 +855,7 @@ export default function Dashboard() {
             <h2 className="font-semibold">趋势源</h2>
             <div className="mt-4 space-y-3 text-sm">
               {sourceStats
-              .filter((entry) => entry.type.startsWith("GitHub") || entry.type === "X热议")
+              .filter((entry) => entry.type.startsWith("GitHub") || entry.type.startsWith("Hugging Face") || entry.type === "X热议")
                 .map((entry) => (
                   <div key={entry.id} className="flex items-start justify-between gap-3">
                     <div>

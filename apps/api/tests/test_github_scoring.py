@@ -19,6 +19,15 @@ def test_high_github_metric_repo_can_rank_high() -> None:
     assert score > 85
 
 
+def test_huggingface_trending_metrics_boost_score() -> None:
+    score = apply_source_specific_score(
+        72.0,
+        {"downloads": 120000, "likes": 1500, "trending_rank": 3},
+        "huggingface_trending",
+    )
+    assert score > 85
+
+
 def test_extract_repo_slugs_from_github_links() -> None:
     html = '<a href="/sponsors/explore">bad</a><a href="/owner/repo">repo</a>'
     assert extract_repo_slugs(html, 10) == ["owner/repo"]
