@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from app.models.item import Item
 from app.models.raw_item import RawItem
 from app.services.github_wechat import fallback_article, repo_metrics, repo_name
+from app.services.wechat_client import markdown_to_wechat_html
 
 
 def make_item() -> Item:
@@ -64,3 +65,10 @@ def test_fallback_article_has_wechat_sections() -> None:
     assert "## 为什么现在值得看" in article["markdown"]
     assert "## 推荐配图" in article["markdown"]
     assert article["image_plan"]["items"]
+
+
+def test_wechat_html_removes_h1_and_keeps_sections() -> None:
+    html = markdown_to_wechat_html("# Title\n\n## Section\n\n- item\n\nProject: https://github.com/example/ai-tool")
+    assert "<h1" not in html
+    assert "<h2>Section</h2>" in html
+    assert "<li>item</li>" in html

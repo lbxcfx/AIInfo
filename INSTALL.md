@@ -117,7 +117,9 @@ WECHAT_APP_ID
 WECHAT_APP_SECRET
 ```
 
-`WECHAT_APP_ID` 和 `WECHAT_APP_SECRET` 用于后续接入微信公众号草稿箱。未配置时，系统只会生成并保存 Markdown 草稿，不会上传微信后台。
+微信公众号草稿箱支持 `WECHAT_APP_ID`/`WECHAT_APP_SECRET`，也兼容 `WECHAT_APPID`/`WECHAT_APPSECRET`。要真正提交草稿箱，还需要配置 `WECHAT_COVER_IMAGE` 或 `WECHAT_THUMB_MEDIA_ID` 作为封面素材；点击“发布草稿箱”后，系统会生成正文并调用微信草稿箱 API。
+
+如果微信返回 `40164 invalid ip`，需要到公众号后台的开发配置中把当前服务器出口 IP 加入 IP 白名单，然后重试“发布草稿箱”。
 
 ## 5. 数据库迁移
 

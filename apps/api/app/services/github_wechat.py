@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
+import httpx
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +13,7 @@ from app.models.raw_item import RawItem
 from app.models.source import Source
 from app.models.wechat_draft import WechatDraft
 from app.services.llm import BigModelClient
+from app.services.wechat_client import WechatApiError, WechatClient
 
 
 GITHUB_WECHAT_STYLE = {
@@ -226,16 +228,29 @@ async def generate_github_wechat_draft(
         generation_error = str(exc)
 
     settings = get_settings()
-    if submit and settings.wechat_app_id and settings.wechat_app_secret:
-        submission_status = "ready_for_wechat_upload"
-        submit_result = {
-            "message": "已生成公众号草稿。当前版本未直接调用微信草稿箱 API，请接入上传预览后再发布。",
-            "requires": ["cover image", "image upload", "preview check", "draft-box API"],
-        }
+    if submit and settings.wechat_draft_enabled and settings.wechat_app_id and settings.wechat_app_secret:
+        try:
+            wechat_result = await WechatClient().add_draft(
+                title=article["title"],
+                digest=article["digest"],
+                markdown=article["markdown"],
+                content_source_url=settings.wechat_source_url or item.canonical_url,
+            )
+            submission_status = "submitted_to_wechat_draft"
+            submit_result = {
+                "message": "已提交到微信公众号草稿箱。",
+                "media_id": wechat_result.get("media_id"),
+                "thumb_media_id": wechat_result.get("thumb_media_id"),
+            }
+        except (WechatApiError, httpx.HTTPError, ValueError) as exc:
+            submission_status = "wechat_submit_failed"
+            submit_result = {
+                "message": f"微信草稿箱提交失败：{exc}",
+            }
     elif submit:
         submission_status = "saved_pending_wechat_credentials"
         submit_result = {
-            "message": "已生成并保存草稿；未配置 WECHAT_APP_ID/WECHAT_APP_SECRET，未上传微信草稿箱。",
+            "message": "已生成并保存草稿；未配置微信凭据或 WECHAT_DRAFT_ENABLED=false，未上传微信草稿箱。",
         }
     else:
         submission_status = "drafted"

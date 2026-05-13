@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,8 +28,19 @@ class Settings(BaseSettings):
     meilisearch_master_key: str = "change_me_in_production"
     github_token: str = Field(default="", repr=False)
     x_bearer_token: str = Field(default="", repr=False)
-    wechat_app_id: str = Field(default="", repr=False)
-    wechat_app_secret: str = Field(default="", repr=False)
+    wechat_app_id: str = Field(
+        default="", validation_alias=AliasChoices("WECHAT_APP_ID", "WECHAT_APPID"), repr=False
+    )
+    wechat_app_secret: str = Field(
+        default="", validation_alias=AliasChoices("WECHAT_APP_SECRET", "WECHAT_APPSECRET"), repr=False
+    )
+    wechat_author: str = "AI 情报站"
+    wechat_source_name: str = "AI 情报站"
+    wechat_source_url: str = ""
+    wechat_cover_image: str = Field(default="", repr=False)
+    wechat_thumb_media_id: str = Field(default="", repr=False)
+    wechat_draft_enabled: bool = True
+    wechat_upload_images: bool = False
 
     llm_provider: str = "bigmodel"
     zai_api_key: str = Field(default="", repr=False)

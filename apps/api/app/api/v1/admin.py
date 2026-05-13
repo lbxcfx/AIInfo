@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.models.wechat_draft import WechatDraft
 from app.schemas.common import ApiResponse
 from app.schemas.item import CrawlRunResult
 from app.schemas.wechat import WechatDraftRead
@@ -109,3 +111,18 @@ async def create_github_wechat_draft(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ApiResponse(data=WechatDraftRead.model_validate(draft))
+
+
+@router.get("/github-wechat/drafts")
+async def list_github_wechat_drafts(
+    limit: int = 30,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[list[WechatDraftRead]]:
+    stmt = (
+        select(WechatDraft)
+        .where(WechatDraft.draft_type == "github_project")
+        .order_by(desc(WechatDraft.created_at))
+        .limit(max(1, min(limit, 100)))
+    )
+    drafts = (await db.execute(stmt)).scalars().all()
+    return ApiResponse(data=[WechatDraftRead.model_validate(draft) for draft in drafts])

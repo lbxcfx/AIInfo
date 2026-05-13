@@ -94,13 +94,14 @@ type GithubWechatDraft = {
   };
   style_notes: Record<string, unknown>;
   submission_status: string;
-  submit_result: { message?: string; generation_fallback?: string };
+  submit_result: { message?: string; generation_fallback?: string; media_id?: string; thumb_media_id?: string };
   created_at: string;
   updated_at: string;
 };
 
 type TabKey = "timeline" | "featured" | "favorites" | "search" | "daily" | "sources";
 type SortKey = "time" | "score";
+type FavoriteView = "items" | "drafts";
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000/api/v1";
 
@@ -345,10 +346,11 @@ export default function Dashboard() {
   const [category, setCategory] = useState("全部");
   const [timeWindow, setTimeWindow] = useState(7);
   const [sortBy, setSortBy] = useState<SortKey>("time");
+  const [favoriteView, setFavoriteView] = useState<FavoriteView>("items");
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [githubDraft, setGithubDraft] = useState<GithubWechatDraft | null>(null);
+  const [wechatDrafts, setWechatDrafts] = useState<GithubWechatDraft[]>([]);
 
   const categories = useMemo(() => {
     const values = new Set(allItems.map((item) => item.category));
@@ -398,16 +400,18 @@ export default function Dashboard() {
   async function loadCore() {
     setLoading(true);
     try {
-      const [itemsData, featuredData, sourceData, dailyData] = await Promise.all([
+      const [itemsData, featuredData, sourceData, dailyData, draftData] = await Promise.all([
         apiGet<Item[]>("/items?limit=100&sort_by=time"),
         apiGet<Item[]>("/featured?limit=50"),
         apiGet<SourceHealth[]>("/sources/health/summary"),
         apiGet<DailyDigest>("/daily"),
+        apiGet<GithubWechatDraft[]>("/admin/github-wechat/drafts?limit=50"),
       ]);
       setAllItems(itemsData);
       setFeaturedItems(featuredData);
       setSources(sourceData);
       setDaily(dailyData);
+      setWechatDrafts(draftData);
       setMessage(null);
     } catch (error) {
       setMessage(`加载失败：${error instanceof Error ? error.message : "未知错误"}`);
@@ -466,8 +470,10 @@ export default function Dashboard() {
       const params = new URLSearchParams({ submit: "true" });
       if (itemId) params.set("item_id", itemId);
       const result = await apiPost<GithubWechatDraft>(`/admin/github-wechat/drafts?${params.toString()}`);
-      setGithubDraft(result);
-      setMessage(`发布草稿箱已生成：${result.title}`);
+      setWechatDrafts((drafts) => [result, ...drafts.filter((draft) => draft.id !== result.id)]);
+      setActiveTab("favorites");
+      setFavoriteView("drafts");
+      setMessage(`${result.submit_result?.message ?? "草稿已生成"}：${result.title}`);
     } catch (error) {
       setMessage(`发布草稿箱生成失败：${error instanceof Error ? error.message : "未知错误"}`);
     } finally {
@@ -652,40 +658,6 @@ export default function Dashboard() {
             </div>
           ) : null}
 
-          {githubDraft ? (
-            <section className="border border-line bg-white p-5">
-              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-normal text-accent">GitHub 发布草稿箱</p>
-                  <h2 className="mt-1 text-lg font-semibold">{githubDraft.title}</h2>
-                  <p className="mt-2 text-sm leading-6 text-ink/65">{githubDraft.digest}</p>
-                </div>
-                <div className="shrink-0 rounded-md bg-field px-3 py-2 text-xs text-ink/60">
-                  {githubDraft.submission_status}
-                </div>
-              </div>
-              <p className="mt-4 border-l-2 border-accent pl-3 text-sm text-ink/65">
-                {githubDraft.submit_result?.message ?? "草稿已保存。"}
-              </p>
-              {githubDraft.image_plan?.items?.length ? (
-                <div className="mt-4 grid gap-2 text-sm md:grid-cols-3">
-                  {githubDraft.image_plan.items.map((image, index) => (
-                    <div key={`${image.type ?? "image"}-${index}`} className="border border-line bg-field p-3">
-                      <p className="font-medium">{image.type ?? "配图"}</p>
-                      <p className="mt-1 break-words text-xs text-ink/55">{image.source ?? "editorial"}</p>
-                      <p className="mt-2 text-xs leading-5 text-ink/65">{image.note ?? "需人工确认版权和预览效果。"}</p>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              <textarea
-                readOnly
-                value={githubDraft.markdown}
-                className="mt-4 h-72 w-full resize-y rounded-md border border-line bg-field p-4 font-mono text-xs leading-5 text-ink outline-none"
-              />
-            </section>
-          ) : null}
-
           {activeTab === "daily" ? (
             <div className="space-y-5">
               <div>
@@ -745,6 +717,47 @@ export default function Dashboard() {
                 })}
               </div>
             </div>
+          ) : activeTab === "favorites" && favoriteView === "drafts" ? (
+            <div className="space-y-5">
+              <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <h2 className="text-xl font-semibold">草稿箱</h2>
+                  <p className="mt-1 text-sm text-ink/60">已生成或已提交到微信公众号草稿箱的记录。</p>
+                </div>
+                <div className="flex overflow-hidden rounded-md border border-line bg-white">
+                  <button
+                    onClick={() => setFavoriteView("items")}
+                    className="px-3 py-2 text-sm text-ink/70 hover:bg-field"
+                  >
+                    收藏素材
+                  </button>
+                  <button className="bg-accent px-3 py-2 text-sm text-white">草稿箱</button>
+                </div>
+              </div>
+              {wechatDrafts.length === 0 ? (
+                <div className="border border-dashed border-line bg-white px-5 py-12 text-sm text-ink/60">
+                  暂无草稿。点击 GitHub 项目上的“发布草稿箱”后会出现在这里。
+                </div>
+              ) : (
+                <section className="bg-white px-5">
+                  {wechatDrafts.map((draft) => (
+                    <article key={draft.id} className="border-b border-line py-5 last:border-b-0">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-ink/55">
+                            <span>{formatDate(draft.created_at)}</span>
+                            <span>{draft.submission_status}</span>
+                            {draft.submit_result?.media_id ? <span>media_id: {draft.submit_result.media_id}</span> : null}
+                          </div>
+                          <h3 className="mt-2 text-lg font-semibold">{draft.title}</h3>
+                          <p className="mt-2 text-sm leading-6 text-ink/65">{draft.submit_result?.message ?? draft.digest}</p>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </section>
+              )}
+            </div>
           ) : (
             <div className="space-y-6">
               <div className="flex items-end justify-between gap-4">
@@ -756,10 +769,22 @@ export default function Dashboard() {
                     当前显示 {filteredItems.length} 条，按{sortBy === "time" ? "发布时间" : "热度分"}排序。
                   </p>
                 </div>
-                <div className="hidden items-center gap-2 text-sm text-ink/55 md:flex">
-                  <TrendingUp className="h-4 w-4" />
-                  {category}
-                </div>
+                {activeTab === "favorites" ? (
+                  <div className="flex overflow-hidden rounded-md border border-line bg-white">
+                    <button className="bg-accent px-3 py-2 text-sm text-white">收藏素材</button>
+                    <button
+                      onClick={() => setFavoriteView("drafts")}
+                      className="px-3 py-2 text-sm text-ink/70 hover:bg-field"
+                    >
+                      草稿箱
+                    </button>
+                  </div>
+                ) : (
+                  <div className="hidden items-center gap-2 text-sm text-ink/55 md:flex">
+                    <TrendingUp className="h-4 w-4" />
+                    {category}
+                  </div>
+                )}
               </div>
 
               {groupedItems.length === 0 ? (
