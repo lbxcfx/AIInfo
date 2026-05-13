@@ -609,17 +609,45 @@ export default function Dashboard() {
               ["daily", "日报", CalendarDays],
               ["sources", "来源", DatabaseZap],
             ].map(([key, label, Icon]) => (
-              <button
-                key={key as string}
-                onClick={() => setActiveTab(key as TabKey)}
-                className={cx(
-                  "flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm",
-                  activeTab === key ? "bg-white font-medium text-accent" : "text-ink/70 hover:bg-white",
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                {label as string}
-              </button>
+              <div key={key as string}>
+                <button
+                  onClick={() => {
+                    setActiveTab(key as TabKey);
+                    if (key === "favorites") setFavoriteView("items");
+                  }}
+                  className={cx(
+                    "flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm",
+                    activeTab === key ? "bg-white font-medium text-accent" : "text-ink/70 hover:bg-white",
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                  {label as string}
+                </button>
+                {key === "favorites" && activeTab === "favorites" ? (
+                  <div className="ml-7 mt-1 space-y-1">
+                    <button
+                      onClick={() => setFavoriteView("items")}
+                      className={cx(
+                        "flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-xs",
+                        favoriteView === "items" ? "bg-white text-accent" : "text-ink/60 hover:bg-white",
+                      )}
+                    >
+                      <Bookmark className="h-3.5 w-3.5" />
+                      收藏素材
+                    </button>
+                    <button
+                      onClick={() => setFavoriteView("drafts")}
+                      className={cx(
+                        "flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-xs",
+                        favoriteView === "drafts" ? "bg-white text-accent" : "text-ink/60 hover:bg-white",
+                      )}
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                      草稿箱
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             ))}
           </nav>
 
