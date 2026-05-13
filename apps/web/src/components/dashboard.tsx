@@ -11,6 +11,8 @@ import {
   FileText,
   Flame,
   GitFork,
+  Bookmark,
+  BookmarkCheck,
   Loader2,
   MessageCircle,
   Newspaper,
@@ -50,6 +52,7 @@ type Item = {
   published_at: string | null;
   final_score: number;
   is_featured: boolean;
+  is_favorite: boolean;
   llm_processed_at: string | null;
   score_details: {
     reason?: string;
@@ -96,7 +99,7 @@ type GithubWechatDraft = {
   updated_at: string;
 };
 
-type TabKey = "timeline" | "featured" | "search" | "daily" | "sources";
+type TabKey = "timeline" | "featured" | "favorites" | "search" | "daily" | "sources";
 type SortKey = "time" | "score";
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000/api/v1";
@@ -241,11 +244,15 @@ function groupByDay(items: Item[]) {
 function ItemRow({
   item,
   generatingDraft,
+  togglingFavorite,
   onGenerateDraft,
+  onToggleFavorite,
 }: {
   item: Item;
   generatingDraft: boolean;
+  togglingFavorite: boolean;
   onGenerateDraft: (itemId: string) => void;
+  onToggleFavorite: (item: Item) => void;
 }) {
   const Icon = sourceIcon(item.source.source_type);
   return (
@@ -285,16 +292,37 @@ function ItemRow({
               排序理由：{item.score_details.reason}
             </p>
           ) : null}
-          {isGithubItem(item) ? (
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             <button
-              onClick={() => onGenerateDraft(item.id)}
-              disabled={generatingDraft}
-              className="mt-4 inline-flex items-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-sm text-ink/75 hover:border-accent disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => onToggleFavorite(item)}
+              disabled={togglingFavorite}
+              className={cx(
+                "inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60",
+                item.is_favorite
+                  ? "border-accent bg-accent text-white"
+                  : "border-line bg-white text-ink/75 hover:border-accent",
+              )}
             >
-              {generatingDraft ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-              公众号稿
+              {togglingFavorite ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : item.is_favorite ? (
+                <BookmarkCheck className="h-4 w-4" />
+              ) : (
+                <Bookmark className="h-4 w-4" />
+              )}
+              {item.is_favorite ? "已收藏" : "收藏"}
             </button>
-          ) : null}
+            {isGithubItem(item) ? (
+              <button
+                onClick={() => onGenerateDraft(item.id)}
+                disabled={generatingDraft}
+                className="inline-flex items-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-sm text-ink/75 hover:border-accent disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {generatingDraft ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                发布草稿箱
+              </button>
+            ) : null}
+          </div>
         </div>
         <div className="w-16 shrink-0 text-right">
           <p className="text-2xl font-semibold text-accent">{Math.round(item.final_score)}</p>
@@ -328,7 +356,14 @@ export default function Dashboard() {
   }, [allItems]);
 
   const filteredItems = useMemo(() => {
-    const source = activeTab === "featured" ? featuredItems : activeTab === "search" ? searchItems : allItems;
+    const source =
+      activeTab === "featured"
+        ? featuredItems
+        : activeTab === "favorites"
+          ? allItems.filter((item) => item.is_favorite)
+          : activeTab === "search"
+            ? searchItems
+            : allItems;
     const filtered = source.filter((item) => {
       const categoryMatched = category === "全部" || item.category === category;
       return categoryMatched && withinWindow(item, timeWindow);
@@ -432,9 +467,41 @@ export default function Dashboard() {
       if (itemId) params.set("item_id", itemId);
       const result = await apiPost<GithubWechatDraft>(`/admin/github-wechat/drafts?${params.toString()}`);
       setGithubDraft(result);
-      setMessage(`GitHub公众号稿已生成：${result.title}`);
+      setMessage(`发布草稿箱已生成：${result.title}`);
     } catch (error) {
-      setMessage(`GitHub公众号稿生成失败：${error instanceof Error ? error.message : "未知错误"}`);
+      setMessage(`发布草稿箱生成失败：${error instanceof Error ? error.message : "未知错误"}`);
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  function replaceItem(updated: Item) {
+    const replace = (items: Item[]) => items.map((item) => (item.id === updated.id ? updated : item));
+    setAllItems(replace);
+    setFeaturedItems(replace);
+    setSearchItems(replace);
+    setDaily((current) =>
+      current
+        ? {
+            ...current,
+            groups: current.groups.map((group) => ({
+              ...group,
+              items: replace(group.items),
+            })),
+          }
+        : current,
+    );
+  }
+
+  async function toggleFavorite(item: Item) {
+    const next = !item.is_favorite;
+    setActionLoading(`favorite-${item.id}`);
+    try {
+      const updated = await apiPost<Item>(`/items/${item.id}/favorite?favorite=${String(next)}`);
+      replaceItem(updated);
+      setMessage(next ? "已加入收藏夹" : "已取消收藏");
+    } catch (error) {
+      setMessage(`收藏操作失败：${error instanceof Error ? error.message : "未知错误"}`);
     } finally {
       setActionLoading(null);
     }
@@ -470,7 +537,7 @@ export default function Dashboard() {
               </button>
               <button onClick={() => void generateGithubDraft()} className="inline-flex items-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-sm hover:border-accent">
                 {actionLoading === "github-draft" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                GitHub稿
+                发布草稿箱
               </button>
               <button onClick={() => void runAction("enrich")} className="inline-flex items-center gap-2 rounded-md bg-accent px-3 py-2 text-sm font-medium text-white">
                 {actionLoading === "enrich" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
@@ -529,6 +596,7 @@ export default function Dashboard() {
             {[
               ["timeline", "时间线", Clock3],
               ["featured", "精选", Flame],
+              ["favorites", "收藏夹", BookmarkCheck],
               ["search", "搜索结果", Search],
               ["daily", "日报", CalendarDays],
               ["sources", "来源", DatabaseZap],
@@ -588,7 +656,7 @@ export default function Dashboard() {
             <section className="border border-line bg-white p-5">
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-normal text-accent">GitHub 公众号草稿</p>
+                  <p className="text-xs font-medium uppercase tracking-normal text-accent">GitHub 发布草稿箱</p>
                   <h2 className="mt-1 text-lg font-semibold">{githubDraft.title}</h2>
                   <p className="mt-2 text-sm leading-6 text-ink/65">{githubDraft.digest}</p>
                 </div>
@@ -634,7 +702,9 @@ export default function Dashboard() {
                       key={item.id}
                       item={item}
                       generatingDraft={actionLoading === `github-draft-${item.id}`}
+                      togglingFavorite={actionLoading === `favorite-${item.id}`}
                       onGenerateDraft={(selectedId) => void generateGithubDraft(selectedId)}
+                      onToggleFavorite={(selectedItem) => void toggleFavorite(selectedItem)}
                     />
                   ))}
                 </section>
@@ -680,7 +750,7 @@ export default function Dashboard() {
               <div className="flex items-end justify-between gap-4">
                 <div>
                   <h2 className="text-xl font-semibold">
-                    {activeTab === "featured" ? "精选情报" : activeTab === "search" ? "搜索结果" : "最新时间线"}
+                    {activeTab === "featured" ? "精选情报" : activeTab === "favorites" ? "收藏夹" : activeTab === "search" ? "搜索结果" : "最新时间线"}
                   </h2>
                   <p className="mt-1 text-sm text-ink/60">
                     当前显示 {filteredItems.length} 条，按{sortBy === "time" ? "发布时间" : "热度分"}排序。
@@ -707,7 +777,9 @@ export default function Dashboard() {
                         key={item.id}
                         item={item}
                         generatingDraft={actionLoading === `github-draft-${item.id}`}
+                        togglingFavorite={actionLoading === `favorite-${item.id}`}
                         onGenerateDraft={(selectedId) => void generateGithubDraft(selectedId)}
+                        onToggleFavorite={(selectedItem) => void toggleFavorite(selectedItem)}
                       />
                     ))}
                   </section>

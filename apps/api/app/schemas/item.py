@@ -28,6 +28,7 @@ class ItemRead(OrmModel):
     relevance_score: float
     final_score: float
     is_featured: bool
+    is_favorite: bool
     processing_status: str
     source: SourceMini
 

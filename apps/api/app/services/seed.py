@@ -179,7 +179,8 @@ SEED_SOURCES = [
                 "topic:rag stars:>300 forks:>20 archived:false",
             ],
             "per_page": 10,
-            "sort": "stars",
+            "sort": "updated",
+            "recent_days": 7,
         },
     },
     {
@@ -245,15 +246,31 @@ async def seed_sources(db: AsyncSession) -> int:
     for source in legacy:
         await db.delete(source)
     created = 0
+    updated = 0
     for payload in SEED_SOURCES:
         existing = await db.execute(select(Source).where(Source.url == payload["url"]))
         source = existing.scalar_one_or_none()
         if source:
+            for key in (
+                "name",
+                "source_type",
+                "tier",
+                "language",
+                "category_hint",
+                "crawl_interval_minutes",
+                "reliability_score",
+                "extra",
+            ):
+                if key in payload:
+                    if getattr(source, key) != payload[key]:
+                        setattr(source, key, payload[key])
+                        updated += 1
             if source.source_type == "x_recent_search" and get_settings().x_bearer_token:
                 source.is_enabled = True
+                updated += 1
             continue
         db.add(Source(**payload))
         created += 1
-    if created or legacy:
+    if created or legacy or updated:
         await db.commit()
     return created

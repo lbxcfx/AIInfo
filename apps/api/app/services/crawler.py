@@ -217,6 +217,13 @@ def extract_stars_today(html: str, slug: str) -> int:
     return int(match.group(1).replace(",", ""))
 
 
+def github_recent_query(query: str, recent_days: int) -> str:
+    if re.search(r"\b(created|pushed|updated):", query):
+        return query
+    since = (datetime.now(timezone.utc) - timedelta(days=recent_days)).date().isoformat()
+    return f"{query} pushed:>={since}"
+
+
 async def fetch_github_repo(client: httpx.AsyncClient, slug: str, headers: dict[str, str]) -> dict[str, Any] | None:
     response = await client.get(f"https://api.github.com/repos/{slug}", headers=headers)
     if response.status_code in {403, 404, 429}:
@@ -372,7 +379,7 @@ async def crawl_web_page_list_source(db: AsyncSession, source: Source) -> tuple[
                     fetched_url=str(list_response.url),
                     raw_title=title,
                     raw_content=description or title,
-                    published_at=html_published_at(response.text),
+                    published_at=html_published_at(response.text) or datetime.now(timezone.utc),
                     http_status=response.status_code,
                     extra={"list_url": source.url, "description": description},
                 )
@@ -410,7 +417,12 @@ async def crawl_github_trending_source(db: AsyncSession, source: Source) -> tupl
             for query in queries:
                 response = await client.get(
                     "https://api.github.com/search/repositories",
-                    params={"q": query, "sort": sort, "order": "desc", "per_page": per_page},
+                    params={
+                        "q": github_recent_query(query, int(source.extra.get("recent_days") or 7)),
+                        "sort": sort,
+                        "order": "desc",
+                        "per_page": per_page,
+                    },
                     headers=headers,
                 )
                 response.raise_for_status()

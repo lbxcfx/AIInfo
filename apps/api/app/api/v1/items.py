@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +30,7 @@ async def list_items(
     category: str | None = None,
     source_id: str | None = None,
     source_type: str | None = None,
+    favorite_only: bool = False,
     days: int | None = Query(default=None, ge=1, le=365),
     enhanced_only: bool = False,
     sort_by: str = Query(default="time", pattern="^(time|score)$"),
@@ -55,6 +56,8 @@ async def list_items(
         stmt = stmt.where(Item.source_id == source_id)
     if source_type:
         stmt = stmt.where(Source.source_type == source_type)
+    if favorite_only:
+        stmt = stmt.where(Item.is_favorite.is_(True))
     if days:
         since = datetime.now(timezone.utc) - timedelta(days=days)
         stmt = stmt.where(Item.published_at >= since)
@@ -62,6 +65,27 @@ async def list_items(
         stmt = stmt.where(Item.llm_processed_at.is_not(None))
     rows = (await db.execute(stmt)).all()
     return ApiResponse(data=[to_item_read(item, source) for item, source in rows])
+
+
+@router.post("/items/{item_id}/favorite")
+async def set_item_favorite(
+    item_id: str,
+    favorite: bool = True,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[ItemRead]:
+    row = (
+        await db.execute(
+            select(Item, Source)
+            .join(Source, Source.id == Item.source_id)
+            .where(Item.id == item_id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="情报不存在")
+    item, source = row
+    item.is_favorite = favorite
+    await db.commit()
+    return ApiResponse(data=to_item_read(item, source))
 
 
 @router.get("/featured")

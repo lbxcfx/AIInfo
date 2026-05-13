@@ -33,6 +33,7 @@ class Item(UUIDMixin, TimestampMixin, Base):
     relevance_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     final_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     is_featured: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_favorite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_duplicate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     duplicate_of: Mapped[str | None] = mapped_column(String(64), nullable=True)
     processing_status: Mapped[str] = mapped_column(String(40), nullable=False, default="processed")
