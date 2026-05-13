@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from typing import Any
+from urllib.parse import urljoin
 from uuid import UUID
 
 import httpx
@@ -19,22 +21,23 @@ from app.services.wechat_client import WechatApiError, WechatClient
 GITHUB_WECHAT_STYLE = {
     "structure": [
         "开场用一句话说明项目解决了什么问题",
-        "给出 GitHub 热度信号和为什么现在值得看",
-        "用三到五个小节拆解功能亮点、技术路线和适用场景",
-        "提供快速上手命令或最小使用路径",
+        "标题直接说明项目用途和优势",
+        "开场说明项目解决的问题，不写趋势信号",
+        "基于 README 总结功能亮点、技术路线和适用场景",
+        "提供 README 中的安装命令、示例代码或最小使用路径",
         "明确限制、风险和同类项目对比视角",
         "结尾给出项目链接和读者行动建议",
     ],
     "images": [
-        "GitHub 仓库首页或 social preview，展示项目名称、stars、forks 和 README 首屏",
-        "README 中的架构图、界面截图或 demo 图，前提是 license 允许转载",
+        "封面优先用 GitHub 仓库主页 OpenGraph 图或主页截图",
+        "正文优先使用 README 中的架构图、界面截图或 demo 图，前提是 license 允许转载",
         "自绘流程图：输入、核心模块、输出、适用场景",
         "表格图：功能、适合人群、上手成本、风险点",
     ],
     "tone": [
         "标题有信息密度，但避免夸大为神器、颠覆、必火",
-        "正文口吻适合技术读者，少堆形容词，多给判断依据",
-        "对 star 数、更新频率、license、维护状态保持审慎",
+        "正文口吻适合技术读者，少堆形容词，多引用 README 证据",
+        "不要把 GitHub stars、forks、trending rank 写成正文卖点",
         "如果没有实际试用，只能写代码阅读和 README 级判断",
     ],
 }
@@ -89,57 +92,164 @@ def repo_metrics(raw: RawItem) -> dict[str, Any]:
     }
 
 
-def fallback_article(item: Item, raw: RawItem) -> dict[str, Any]:
+def repo_slug(item: Item) -> str:
+    return repo_name(item).replace("https://github.com/", "").strip("/")
+
+
+def github_og_image(item: Item) -> str:
+    return f"https://opengraph.githubassets.com/aiinfo/{repo_slug(item)}"
+
+
+def project_description(item: Item, raw: RawItem) -> str:
+    if ":" in item.title_original:
+        desc = item.title_original.split(":", 1)[1].strip()
+        if desc:
+            return desc[:260]
+    text = raw.raw_content or item.content_text or item.summary_short
+    text = re.sub(r"GitHub\s*仓库趋势信号。?", "", text)
+    text = re.sub(r"stars:\s*\d+;?", "", text, flags=re.I)
+    text = re.sub(r"forks:\s*\d+;?", "", text, flags=re.I)
+    text = re.sub(r"stars today:\s*\d+;?", "", text, flags=re.I)
+    text = re.sub(r"language:\s*[^;.]+[;.]?", "", text, flags=re.I)
+    text = re.sub(r"topics:\s*[^.]+[.]?", "", text, flags=re.I)
+    return text.strip(" ;.。")[:260] or "这个项目提供了一套面向 AI 开发场景的开源能力。"
+
+
+def fallback_title(item: Item, raw: RawItem) -> str:
+    name = repo_name(item).split("/")[-1]
+    desc = project_description(item, raw)
+    if "design" in name.lower() or "设计" in desc:
+        return f"{name}：本地优先的 AI 设计工具"
+    if "agent" in desc.lower() or "agent" in name.lower():
+        return f"{name}：面向开发者的 AI Agent 工具"
+    if "workflow" in desc.lower():
+        return f"{name}：简化 AI 工作流的开源工具"
+    return f"{name}：快速上手的 AI 开源工具"
+
+
+def extract_markdown_images(markdown: str, base_url: str) -> list[str]:
+    urls: list[str] = []
+    for pattern in (r"!\[[^\]]*\]\(([^)]+)\)", r"<img[^>]+src=[\"']([^\"']+)[\"']"):
+        for match in re.finditer(pattern, markdown, flags=re.I):
+            url = match.group(1).strip()
+            if url.startswith("#") or url.startswith("data:"):
+                continue
+            absolute = urljoin(base_url, url)
+            if absolute.startswith(("http://", "https://")) and absolute not in urls:
+                urls.append(absolute)
+            if len(urls) >= 3:
+                return urls
+    return urls
+
+
+def readme_sections(markdown: str) -> str:
+    lines: list[str] = []
+    in_code = False
+    for line in markdown.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code = not in_code
+            lines.append(line)
+            continue
+        if in_code or stripped.startswith(("#", "-", "*", "1.", "2.", "3.", "4.", "5.")):
+            lines.append(line)
+        elif stripped and len(stripped) > 30:
+            lines.append(line)
+        if len("\n".join(lines)) > 4000:
+            break
+    return "\n".join(lines)[:4000]
+
+
+def readme_code_examples(markdown: str) -> list[str]:
+    examples: list[str] = []
+    for match in re.finditer(r"```[^\n]*\n(.*?)```", markdown, flags=re.S):
+        code = match.group(1).strip()
+        if 10 <= len(code) <= 500:
+            examples.append(code)
+        if len(examples) >= 2:
+            break
+    return examples
+
+
+def readme_bullets(markdown: str) -> list[str]:
+    bullets: list[str] = []
+    for line in markdown.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("- ", "* ")) and len(stripped) > 12:
+            text = re.sub(r"[*_`#]", "", stripped[2:]).strip()
+            if text and text not in bullets:
+                bullets.append(text[:160])
+        if len(bullets) >= 5:
+            break
+    return bullets
+
+
+async def fetch_github_readme(item: Item) -> dict[str, Any]:
+    slug = repo_slug(item)
+    headers = github_headers()
+    async with httpx.AsyncClient(timeout=25, follow_redirects=True, trust_env=False) as client:
+        response = await client.get(f"https://api.github.com/repos/{slug}/readme", headers=headers)
+        response.raise_for_status()
+        payload = response.json()
+        download_url = payload.get("download_url")
+        if not download_url:
+            return {"markdown": "", "images": []}
+        readme_response = await client.get(download_url, headers={"User-Agent": "AIIntelRadarBot/0.1 (+local-dev)"})
+        readme_response.raise_for_status()
+        markdown = readme_response.text
+    return {
+        "markdown": markdown,
+        "summary": readme_sections(markdown),
+        "images": extract_markdown_images(markdown, download_url),
+        "download_url": download_url,
+    }
+
+
+def fallback_article(item: Item, raw: RawItem, readme: dict[str, Any] | None = None) -> dict[str, Any]:
     name = repo_name(item)
     metrics = repo_metrics(raw)
     topics = "、".join(metrics["topics"][:6]) if metrics["topics"] else "暂未标注"
-    title = f"{name}：一个值得关注的 AI 开源项目"
-    digest = f"{name} 在 GitHub 上表现活跃，适合从用途、技术路线、上手成本和维护信号四个角度判断是否值得跟进。"
+    desc = project_description(item, raw)
+    title = fallback_title(item, raw)
+    digest = f"{name} 的 README 显示，它可以从解决的问题、核心能力、上手路径和适用场景四个角度快速评估。"
+    readme_markdown = str((readme or {}).get("markdown") or "")
+    bullets = readme_bullets(readme_markdown)
+    examples = readme_code_examples(readme_markdown)
+    bullet_text = "\n".join(f"- **README 要点**：{text}" for text in bullets[:4]) or (
+        "- **README 要点**：先看安装方式、示例命令、配置说明和导出能力。"
+    )
+    example_text = "\n\n".join(f"```bash\n{example}\n```" for example in examples[:2]) or (
+        "如果 README 提供安装命令或 demo，建议先跑通最小示例，再判断是否适合自己的项目。"
+    )
     markdown = f"""# {title}
 
-## 一句话看懂
+## 这个项目解决什么问题
 
-{item.summary_short or raw.raw_content}
+**{desc}**
 
-## 为什么现在值得看
+## 它的主要优势
 
-- GitHub stars：{metrics["stars"]}
-- forks：{metrics["forks"]}
-- 今日新增 stars：{metrics["stars_today"]}
-- 主要语言：{metrics["language"]}
-- 主题标签：{topics}
-- 项目链接：{item.canonical_url}
+- **定位清晰**：围绕 README 描述中的具体使用场景展开，而不是只靠热度判断。
+- **技术栈明确**：主要语言是 **{metrics["language"]}**，主题包括 {topics}。
+- **适合快速评估**：可以先从 README 的安装命令、示例代码和 demo 图判断上手成本。
 
-这些指标不能直接证明项目质量，但能说明它正在被开发者关注。对公众号读者来说，更重要的是它解决什么问题、是否容易上手、维护是否稳定。
+## README 里的关键内容
 
-## 它可能解决的问题
+{bullet_text}
 
-从仓库描述看，这个项目与 AI 开发、工程效率或应用构建有关。写作时建议把它放进一个具体场景：例如本地开发、智能体工作流、RAG 应用、模型部署、数据处理或前端交互。
+## README 示例展示
 
-## 值得展开的功能点
+{example_text}
 
-1. 项目定位：它面向开发者、研究者还是产品团队。
-2. 技术路线：核心模块、依赖栈、输入输出路径。
-3. 上手体验：README 是否有安装命令、示例代码和 demo。
-4. 维护信号：stars、forks、近期提交、issue 活跃度。
-5. 风险限制：license、文档完整性、生产可用性和同类替代。
+## 适合谁使用
 
-## 推荐配图
+- **开发者**：用它作为 AI 工程样例或工具链补充。
+- **产品和技术负责人**：用它判断某类 AI 工具是否已有开源实现。
+- **内容创作者**：用 README 截图、示例命令和功能图做图文拆解。
 
-1. GitHub 仓库首页截图，展示项目名、stars、forks 和 README 首屏。
-2. README 中的架构图或界面截图；转载前检查 license。
-3. 自绘一张“输入 - 核心模块 - 输出 - 使用场景”的流程图。
-4. 自制表格：功能亮点、适合人群、上手成本、风险点。
+## 使用前要确认
 
-## 适合谁关注
-
-- 想快速筛选 AI 开源项目的开发者。
-- 需要找工程样例或技术选型参考的团队。
-- 希望跟踪 GitHub AI 趋势的产品和研究人员。
-
-## 先别过度解读
-
-GitHub 热度不是质量保证。正式推荐前，建议至少检查 README、license、最近提交、issue 回复情况，并实际跑通最小示例。
+**不要只看热度。** 正式采用前，建议确认 license、最近提交、issue 回复、README 示例是否能跑通。
 
 ## 项目地址
 
@@ -160,7 +270,7 @@ GitHub 热度不是质量保证。正式推荐前，建议至少检查 README、
     }
 
 
-def writer_prompt(item: Item, raw: RawItem, source: Source) -> list[dict[str, str]]:
+def writer_prompt(item: Item, raw: RawItem, source: Source, readme: dict[str, Any]) -> list[dict[str, str]]:
     metrics = repo_metrics(raw)
     return [
         {
@@ -169,6 +279,10 @@ def writer_prompt(item: Item, raw: RawItem, source: Source) -> list[dict[str, st
                 "你是中文技术公众号编辑，专门写 GitHub AI 开源项目解读。"
                 "输出必须是 JSON object，字段为 title, digest, markdown, image_plan, style_notes。"
                 "不要夸大项目，不要声称已经生产可用，除非证据明确。"
+                "不要在正文写 GitHub stars、forks、trending rank 等趋势信号。"
+                "标题要说清楚项目用途和优势，不要写“值得关注”。"
+                "正文关键短语用 **加粗**。"
+                "除项目名、命令和专有名词外，正文必须用中文写作。"
             ),
         },
         {
@@ -180,21 +294,31 @@ def writer_prompt(item: Item, raw: RawItem, source: Source) -> list[dict[str, st
                 f"来源: {source.name} / {source.source_type}\n"
                 f"标题: {item.title_original}\n"
                 f"摘要: {item.summary_short}\n"
-                f"正文线索: {item.content_text[:1800]}\n"
-                f"热度指标: {metrics}\n"
+                f"采集线索: {item.content_text[:1000]}\n"
+                f"README 摘要和示例: {readme.get('summary', '')}\n"
+                f"内部参考指标（只用于判断，不要写进正文）: {metrics}\n"
+                f"可用 README 图片: {readme.get('images', [])}\n"
                 f"写作方法参考: {GITHUB_WECHAT_STYLE}\n"
                 "要求：标题不要超过 28 个中文字符；digest 不超过 120 字；"
-                "markdown 包含：开场、为什么值得看、核心功能、快速上手、配图建议、限制、项目地址。"
+                "markdown 包含：项目解决什么问题、核心优势、README 示例/命令、适用场景、使用前注意、项目地址。"
+                "不要写“GitHub 趋势信号”“stars”“forks”“今日新增 stars”等表达。"
             ),
         },
     ]
 
 
-def normalize_article(payload: dict[str, Any], item: Item, raw: RawItem) -> dict[str, Any]:
-    fallback = fallback_article(item, raw)
+def normalize_article(
+    payload: dict[str, Any], item: Item, raw: RawItem, readme: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    fallback = fallback_article(item, raw, readme)
     title = str(payload.get("title") or fallback["title"]).strip()
     digest = str(payload.get("digest") or fallback["digest"]).strip()
     markdown = str(payload.get("markdown") or fallback["markdown"]).strip()
+    if readme and "示例" not in markdown:
+        examples = readme_code_examples(str(readme.get("markdown") or ""))
+        example_text = "\n\n".join(f"```bash\n{example}\n```" for example in examples[:2])
+        if example_text:
+            markdown = f"{markdown}\n\n## README 示例展示\n\n{example_text}"
     image_plan = payload.get("image_plan") if isinstance(payload.get("image_plan"), dict) else fallback["image_plan"]
     style_notes = payload.get("style_notes") if isinstance(payload.get("style_notes"), dict) else fallback["style_notes"]
     return {
@@ -213,17 +337,21 @@ async def generate_github_wechat_draft(
     submit: bool = True,
 ) -> WechatDraft:
     item, raw, source = await choose_github_item(db, item_id)
-    article = fallback_article(item, raw)
+    try:
+        readme = await fetch_github_readme(item)
+    except Exception:
+        readme = {"markdown": "", "summary": "", "images": []}
+    article = fallback_article(item, raw, readme)
     generation_error = None
     try:
         client = BigModelClient()
         payload, _usage = await client.chat_json(
             model=client.settings.llm_model_summary,
-            messages=writer_prompt(item, raw, source),
+            messages=writer_prompt(item, raw, source, readme),
             temperature=client.settings.llm_temperature_summary,
             max_tokens=min(client.settings.llm_max_tokens_summary, 3500),
         )
-        article = normalize_article(payload, item, raw)
+        article = normalize_article(payload, item, raw, readme)
     except Exception as exc:
         generation_error = str(exc)
 
@@ -235,12 +363,15 @@ async def generate_github_wechat_draft(
                 digest=article["digest"],
                 markdown=article["markdown"],
                 content_source_url=settings.wechat_source_url or item.canonical_url,
+                cover_image_url=github_og_image(item),
+                body_image_urls=readme.get("images", []),
             )
             submission_status = "submitted_to_wechat_draft"
             submit_result = {
                 "message": "已提交到微信公众号草稿箱。",
                 "media_id": wechat_result.get("media_id"),
                 "thumb_media_id": wechat_result.get("thumb_media_id"),
+                "uploaded_images": wechat_result.get("uploaded_images", []),
             }
         except (WechatApiError, httpx.HTTPError, ValueError) as exc:
             submission_status = "wechat_submit_failed"

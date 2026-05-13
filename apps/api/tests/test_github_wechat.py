@@ -61,14 +61,15 @@ def test_repo_metrics_normalizes_extra_values() -> None:
 
 def test_fallback_article_has_wechat_sections() -> None:
     article = fallback_article(make_item(), make_raw())
-    assert "example/ai-tool" in article["title"]
-    assert "## 为什么现在值得看" in article["markdown"]
-    assert "## 推荐配图" in article["markdown"]
+    assert "AI" in article["title"]
+    assert "## 这个项目解决什么问题" in article["markdown"]
+    assert "## README 里的关键内容" in article["markdown"]
+    assert "GitHub stars" not in article["markdown"]
     assert article["image_plan"]["items"]
 
 
 def test_wechat_html_removes_h1_and_keeps_sections() -> None:
     html = markdown_to_wechat_html("# Title\n\n## Section\n\n- item\n\nProject: https://github.com/example/ai-tool")
     assert "<h1" not in html
-    assert "<h2>Section</h2>" in html
+    assert ">Section</h2>" in html
     assert "<li>item</li>" in html
