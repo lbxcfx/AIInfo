@@ -90,7 +90,7 @@ type GithubWechatDraft = {
   digest: string;
   markdown: string;
   image_plan: {
-    items?: Array<{ type?: string; source?: string; note?: string }>;
+    items?: Array<{ type?: string; source?: string; placement?: string; caption?: string; note?: string }>;
   };
   style_notes: Record<string, unknown>;
   submission_status: string;
@@ -242,6 +242,16 @@ function groupByDay(items: Item[]) {
     }
     return groups;
   }, []);
+}
+
+function markdownPreview(value: string) {
+  return value
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 10)
+    .join("\n")
+    .slice(0, 900);
 }
 
 function ItemRow({
@@ -772,16 +782,42 @@ export default function Dashboard() {
                 <section className="bg-white px-5">
                   {wechatDrafts.map((draft) => (
                     <article key={draft.id} className="border-b border-line py-5 last:border-b-0">
-                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-ink/55">
-                            <span>{formatDate(draft.created_at)}</span>
-                            <span>{draft.submission_status}</span>
-                            {draft.submit_result?.media_id ? <span>media_id: {draft.submit_result.media_id}</span> : null}
-                          </div>
-                          <h3 className="mt-2 text-lg font-semibold">{draft.title}</h3>
-                          <p className="mt-2 text-sm leading-6 text-ink/65">{draft.submit_result?.message ?? draft.digest}</p>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-ink/55">
+                          <span>{formatDate(draft.created_at)}</span>
+                          <span>{draft.submission_status}</span>
+                          {draft.submit_result?.media_id ? <span>media_id: {draft.submit_result.media_id}</span> : null}
                         </div>
+                        <h3 className="mt-2 text-lg font-semibold">{draft.title}</h3>
+                        <p className="mt-2 text-sm leading-6 text-ink/65">{draft.submit_result?.message ?? draft.digest}</p>
+                        <p className="mt-2 text-sm leading-6 text-ink/75">{draft.digest}</p>
+
+                        <details className="mt-4 border border-line bg-field px-4 py-3">
+                          <summary className="cursor-pointer text-sm font-medium text-ink/80">查看正文和配图计划</summary>
+                          <div className="mt-4 grid gap-4 lg:grid-cols-[1.2fr_1fr]">
+                            <div>
+                              <h4 className="text-xs font-semibold uppercase tracking-normal text-ink/50">正文预览</h4>
+                              <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-white p-3 text-xs leading-5 text-ink/70">
+                                {markdownPreview(draft.markdown)}
+                              </pre>
+                            </div>
+                            <div>
+                              <h4 className="text-xs font-semibold uppercase tracking-normal text-ink/50">配图计划</h4>
+                              <div className="mt-2 space-y-2">
+                                {(draft.image_plan.items ?? []).slice(0, 6).map((image, index) => (
+                                  <div key={`${draft.id}-${image.type ?? index}`} className="rounded-md bg-white p-3 text-xs leading-5 text-ink/65">
+                                    <div className="flex flex-wrap items-center gap-2 font-medium text-ink/80">
+                                      <span>{image.type ?? "image"}</span>
+                                      {image.placement ? <span className="text-ink/45">{image.placement}</span> : null}
+                                    </div>
+                                    {image.caption ? <p className="mt-1">{image.caption}</p> : null}
+                                    {image.note ? <p className="mt-1 text-ink/50">{image.note}</p> : null}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        </details>
                       </div>
                     </article>
                   ))}
